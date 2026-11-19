@@ -235,7 +235,7 @@ X-LendLoop-Signature: hex( HMAC-SHA256( secret, timestamp + "." + rawBody ) )
 ## Testing and failure drills
 
 ```bash
-npm test                      # 61 tests: vitest + convex-test
+npm test                      # 62 tests: vitest + convex-test
 npm run lint && npm run typecheck
 npm run secrets               # gitleaks over git history
 ```

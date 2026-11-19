@@ -115,6 +115,14 @@ describe("state transitions (FR-L4)", () => {
   });
 });
 
+test("an expired pending request can't be approved", async () => {
+  const { lender, bob, toolId } = await world();
+  const loanId = await bob.as.mutation(api.loans.request, { toolId, startDate: "2026-11-19", endDate: "2026-11-20" });
+  vi.setSystemTime(new Date("2026-11-22T08:00:00Z"));
+  await expectAppError(lender.as.mutation(api.loans.approve, { loanId }), "INVALID_TRANSITION");
+  await lender.as.mutation(api.loans.decline, { loanId });
+});
+
 describe("overlap check (FR-L3)", () => {
   test("approval is rejected when dates overlap an approved loan", async () => {
     const { lender, bob, cara, toolId } = await world();

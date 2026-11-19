@@ -54,6 +54,9 @@ export const approve = mutation({
   handler: async (ctx, { loanId }) => {
     const { loan } = await requireLoanParty(ctx, loanId, ["owner"]);
     const status = nextStatus(loan.status, "approve");
+    if (loan.endDate < todayUtc()) {
+      throw appError("INVALID_TRANSITION", "This request has expired: its dates are in the past. Decline it instead.");
+    }
 
     const clash = (await approvedLoansForTool(ctx, loan.toolId)).find(
       (other) =>

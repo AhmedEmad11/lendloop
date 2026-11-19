@@ -40,6 +40,8 @@ export const buildPayload = internalQuery({
     const type = event.type as OutboundEventType;
     const loan = await ctx.db.get(event.loanId);
     if (!loan) return null;
+    // Don't send a stale request.created (e.g. retried after the borrower cancelled).
+    if (type === "request.created" && loan.status !== "pending") return null;
     const [tool, recipient] = await Promise.all([
       ctx.db.get(loan.toolId),
       ctx.db.get(RECIPIENT[type] === "owner" ? loan.ownerId : loan.borrowerId),
