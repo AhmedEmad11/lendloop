@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Block commits that contain secrets. Uses a local gitleaks binary if present,
+# otherwise the pinned official Docker image.
+set -euo pipefail
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --staged --redact --no-banner
+else
+  docker run --rm -v "$(git rev-parse --show-toplevel)":/repo -w /repo \
+    zricethezav/gitleaks:v8.28.0 git --staged --redact --no-banner
+fi
