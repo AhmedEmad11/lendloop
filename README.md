@@ -157,7 +157,7 @@ Every public query and mutation starts with one helper from `convex/lib/auth.ts`
 | `requireLoanParty(..., ["borrower"])` | `loans.cancel` | caller made the request |
 | `requireLoanParty(..., ["owner","admin"])` | `loans.markReturned` | lender confirms the return; an admin may too |
 
-- **Roles:** new users are `user`. Admins come from the CLI-only `internal.users.setRole`, or from `ADMIN_EMAILS` on sign-in. That bootstrap only promotes, never demotes. No client path can change a role.
+- **Roles:** new users are `user`. Admins come from the CLI-only `internal.users.setRole`, or from `ADMIN_EMAILS` on **first** sign-in only, so a later demotion sticks. No client path can change a role.
 - **Machine-only code is `internal*`:** delivery, the overdue list, write-backs and seeding can't be called from a browser.
 - **Server-enforced state machine:** every transition goes through `nextStatus()`. Approval also rejects dates that overlap another approved loan (FR-L3).
 - **Input validation:** Convex validators enforce the enums (category, condition, status). Lengths and control characters are checked at runtime, and dates are validated as real calendar dates. React renders all text as text, never as HTML.
@@ -215,6 +215,8 @@ X-LendLoop-Signature: hex( HMAC-SHA256( secret, timestamp + "." + rawBody ) )
 
 **Retries with backoff.** `deliver` makes up to 4 attempts: right away, then after 30 s, 2 min and 10 min. Each failure records `lastError`. After the last attempt the event becomes `failed`, appears under **Admin → Automation issues**, and is logged. A non-2xx response counts as a failure, and requests time out after 10 s.
 
+**Stalled-delivery sweep.** Convex doesn't retry actions, so a delivery that dies between the HTTP call and its bookkeeping would leave an event `queued` forever. A cron (`convex/crons.ts`, every 15 min) re-queues outbound events nobody has touched for 15 minutes, or marks them `failed` if every attempt is used. A stale `request.created` (for example retried after the borrower cancelled) is settled as skipped instead of being sent.
+
 **Idempotency.**
 
 | Where | Key | Behaviour |
@@ -235,7 +237,7 @@ X-LendLoop-Signature: hex( HMAC-SHA256( secret, timestamp + "." + rawBody ) )
 ## Testing and failure drills
 
 ```bash
-npm test                      # 62 tests: vitest + convex-test
+npm test                      # 88 tests: vitest + convex-test
 npm run lint && npm run typecheck
 npm run secrets               # gitleaks over git history
 ```
@@ -247,6 +249,7 @@ npm run secrets               # gitleaks over git history
 | `convex/public.test.ts` | the public projection has exactly `{name, category}` and leaks nothing about owners |
 | `convex/integration.test.ts` | HTTP signature rejection (missing, wrong, expired, tampered), idempotent reminders, error write-back, signed minimal payload, retry → `failed` with n8n down |
 | `convex/lib/*.test.ts` | HMAC against an openssl reference vector, 5-minute window both ways, dates |
+| `tests/n8nWorkflows.test.ts` | runs the n8n Code-node `jsCode` from the exported JSON: verify (tampered, expired, wrong secret, eventId mismatch), dedupe only after send, every signer cross-checked against `lib/hmac.ts`, force-fail, masked logs |
 
 **Live drills** against the running stack, mapped to SRS §11 (all run during development):
 

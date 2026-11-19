@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { expectAppError, listTool, setup, signIn } from "../tests/convexHarness";
 
 // Acceptance criteria 2 and 3: forged IDs and non-admin calls are rejected by
@@ -49,6 +49,11 @@ describe("authentication", () => {
       const t = setup();
       const { as } = await signIn(t, "Boss");
       expect((await as.query(api.users.me, {}))?.role).toBe("admin");
+
+      // Bootstrap applies on first sign-in only: a later demotion sticks.
+      await t.mutation(internal.users.setRole, { email: "boss@example.com", role: "user" });
+      await as.mutation(api.users.ensure, {});
+      expect((await as.query(api.users.me, {}))?.role).toBe("user");
     } finally {
       vi.unstubAllEnvs();
     }

@@ -30,8 +30,8 @@ export const ensure = mutation({
       const patch: Partial<typeof existing> = {};
       if (existing.email !== email) patch.email = email;
       if (existing.firstName !== firstName) patch.firstName = firstName;
-      // Bootstrap only ever promotes; demotion is an explicit admin action.
-      if (bootstrapAdmin && existing.role !== "admin") patch.role = "admin";
+      // Role is never touched here: ADMIN_EMAILS applies on first sign-in only,
+      // so a later demotion via users:setRole sticks.
       if (Object.keys(patch).length > 0) await ctx.db.patch(existing._id, patch);
       return existing._id;
     }

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { sign, verify } from "./lib/hmac";
-import { MAX_ATTEMPTS } from "./notify";
+import { MAX_ATTEMPTS, STALE_AFTER_MS } from "./notify";
 import { listTool, setup, signIn, type T } from "../tests/convexHarness";
 
 const CONVEX_SECRET = "test-convex-secret"; // n8n -> Convex
@@ -267,5 +267,63 @@ describe("outbound delivery (SR-4, RR-3, AC6)", () => {
 
     const [event] = await t.run((ctx) => ctx.db.query("automationEvents").collect());
     expect(event).toMatchObject({ status: "sent", attempts: 2 });
+  });
+
+  test("a request.created retried after the borrower cancelled is skipped, not sent", async () => {
+    const t = setup();
+    const lena = await signIn(t, "Lena");
+    const bob = await signIn(t, "Bob");
+    const toolId = await listTool(lena.as, "Tent");
+    const loanId = await bob.as.mutation(api.loans.request, { toolId, startDate: "2026-11-20", endDate: "2026-11-21" });
+    await bob.as.mutation(api.loans.cancel, { loanId });
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const created = (await t.run((ctx) => ctx.db.query("automationEvents").collect())).find(
+      (e) => e.type === "request.created",
+    )!;
+    await t.action(internal.notify.deliver, { eventId: created.eventId });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const after = await t.run((ctx) => ctx.db.get(created._id));
+    expect(after).toMatchObject({ status: "sent", detail: "skipped: request already cancelled" });
+  });
+});
+
+describe("stalled delivery sweep (rule 7)", () => {
+  async function stalled(attempts: number) {
+    const t = setup();
+    const lena = await signIn(t, "Lena");
+    const bob = await signIn(t, "Bob");
+    const toolId = await listTool(lena.as, "Tent");
+    await bob.as.mutation(api.loans.request, { toolId, startDate: "2026-11-20", endDate: "2026-11-21" });
+    // Simulate a delivery chain that died: queued, nothing touching it.
+    await t.run(async (ctx) => {
+      const [e] = await ctx.db.query("automationEvents").collect();
+      await ctx.db.patch(e._id, { attempts });
+    });
+    vi.setSystemTime(Date.now() + STALE_AFTER_MS + 60_000);
+    return t;
+  }
+
+  test("re-queues stalled events and fails exhausted ones", async () => {
+    const t = await stalled(1);
+    expect(await t.mutation(internal.notify.sweepStale, {})).toEqual({ requeued: 1, failed: 0 });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("ok", { status: 200 })));
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const [event] = await t.run((ctx) => ctx.db.query("automationEvents").collect());
+    expect(event.status).toBe("sent");
+
+    const t2 = await stalled(MAX_ATTEMPTS);
+    expect(await t2.mutation(internal.notify.sweepStale, {})).toEqual({ requeued: 0, failed: 1 });
+  });
+
+  test("leaves fresh queued events alone", async () => {
+    const t = setup();
+    const lena = await signIn(t, "Lena");
+    const bob = await signIn(t, "Bob");
+    const toolId = await listTool(lena.as, "Tent");
+    await bob.as.mutation(api.loans.request, { toolId, startDate: "2026-11-20", endDate: "2026-11-21" });
+    expect(await t.mutation(internal.notify.sweepStale, {})).toEqual({ requeued: 0, failed: 0 });
   });
 });

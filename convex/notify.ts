@@ -39,15 +39,17 @@ export const buildPayload = internalQuery({
     }
     const type = event.type as OutboundEventType;
     const loan = await ctx.db.get(event.loanId);
-    if (!loan) return null;
+    if (!loan) return { kind: "skip" as const, reason: "loan no longer exists" };
     // Don't send a stale request.created (e.g. retried after the borrower cancelled).
-    if (type === "request.created" && loan.status !== "pending") return null;
+    if (type === "request.created" && loan.status !== "pending") {
+      return { kind: "skip" as const, reason: `request already ${loan.status}` };
+    }
     const [tool, recipient] = await Promise.all([
       ctx.db.get(loan.toolId),
       ctx.db.get(RECIPIENT[type] === "owner" ? loan.ownerId : loan.borrowerId),
     ]);
-    if (!recipient) return null;
-    return {
+    if (!recipient) return { kind: "skip" as const, reason: "recipient no longer exists" };
+    const payload = {
       eventId: event.eventId,
       type,
       loanId: loan._id,
@@ -57,6 +59,7 @@ export const buildPayload = internalQuery({
       dates: { start: loan.startDate, end: loan.endDate },
       occurredAt: event.createdAt,
     };
+    return { kind: "send" as const, payload };
   },
 });
 
@@ -86,11 +89,68 @@ export const recordAttempt = internalMutation({
   },
 });
 
+/** Settles an event that no longer needs sending, so it never sits in `queued`. */
+export const settleSkipped = internalMutation({
+  args: { eventId: v.string(), reason: v.string() },
+  handler: async (ctx, { eventId, reason }) => {
+    const event = await ctx.db
+      .query("automationEvents")
+      .withIndex("by_eventId", (q) => q.eq("eventId", eventId))
+      .unique();
+    if (!event || event.status !== "queued") return;
+    await ctx.db.patch(event._id, { status: "sent", detail: `skipped: ${reason}`, updatedAt: Date.now() });
+  },
+});
+
+/**
+ * Safety net for rule 7 ("nothing fails silently"). Convex doesn't retry
+ * actions, so if deliver dies between fetch and recordAttempt (deploy,
+ * timeout) the event would stay queued with nothing scheduled. A healthy
+ * retry chain always touches the row within 10 minutes; anything quieter than
+ * STALE_AFTER_MS is re-queued, or failed if it already used every attempt.
+ */
+export const STALE_AFTER_MS = 15 * 60_000;
+
+export const sweepStale = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - STALE_AFTER_MS;
+    const queued = await ctx.db
+      .query("automationEvents")
+      .withIndex("by_status", (q) => q.eq("status", "queued"))
+      .collect();
+    let requeued = 0;
+    let failed = 0;
+    for (const event of queued) {
+      if (event.direction !== "outbound" || event.updatedAt > cutoff) continue;
+      if (event.attempts >= MAX_ATTEMPTS) {
+        await ctx.db.patch(event._id, {
+          status: "failed",
+          lastError: event.lastError ?? "delivery stalled",
+          updatedAt: Date.now(),
+        });
+        failed++;
+      } else {
+        await ctx.db.patch(event._id, { updatedAt: Date.now() });
+        await ctx.scheduler.runAfter(0, internal.notify.deliver, { eventId: event.eventId });
+        requeued++;
+      }
+    }
+    if (requeued + failed > 0) console.warn(`notify sweep: requeued ${requeued}, failed ${failed}`);
+    return { requeued, failed };
+  },
+});
+
 export const deliver = internalAction({
   args: { eventId: v.string() },
   handler: async (ctx, { eventId }) => {
-    const payload = await ctx.runQuery(internal.notify.buildPayload, { eventId });
-    if (!payload) return;
+    const built = await ctx.runQuery(internal.notify.buildPayload, { eventId });
+    if (!built) return;
+    if (built.kind === "skip") {
+      await ctx.runMutation(internal.notify.settleSkipped, { eventId, reason: built.reason });
+      return;
+    }
+    const { payload } = built;
 
     const baseUrl = process.env.N8N_WEBHOOK_URL;
     const secret = process.env.LENDLOOP_N8N_HMAC_SECRET;
