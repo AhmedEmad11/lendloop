@@ -49,6 +49,12 @@ export function assertValidLoanDates(start: string, end: string, today: string):
   }
 }
 
+export function addDays(iso: string, days: number): string {
+  const ms = parseIsoDate(iso);
+  if (ms === null) throw new Error("addDays: invalid date");
+  return new Date(ms + days * DAY_MS).toISOString().slice(0, 10);
+}
+
 /** Inclusive ranges [aStart, aEnd] and [bStart, bEnd] share at least one day. */
 export function rangesOverlap(
   aStart: string,

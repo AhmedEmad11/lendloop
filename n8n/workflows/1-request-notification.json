@@ -1,0 +1,250 @@
+{
+  "id": "lendloopNotifyWf",
+  "name": "LendLoop – Request notification",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "lendloopErrorWf1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": false
+  },
+  "nodes": [
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "5d0f3c1e-1a2b-4c3d-9e8f-6c656e646c01",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop/request-event",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": { "rawBody": true }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "lendloopHdrAuth1", "name": "LendLoop webhook header" }
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000002",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// SR-4: verify HMAC(secret, timestamp + '.' + rawBody), 5-minute window, constant-time compare.\n// The secret comes from the container env, so it never appears in this exported JSON.\nconst crypto = require('crypto');\nconst item = $input.first();\nconst headers = item.json.headers || {};\nlet raw;\nif (item.binary && item.binary.data) {\n  raw = (await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8');\n} else {\n  raw = JSON.stringify(item.json.body);\n}\nconst ts = headers['x-lendloop-timestamp'];\nconst sig = String(headers['x-lendloop-signature'] || '').toLowerCase();\nconst eventId = headers['x-lendloop-event-id'];\nconst secret = $env.LENDLOOP_N8N_HMAC_SECRET;\nconst reject = (reason) => [{ json: { valid: false, reason } }];\n\nif (!secret) return reject('not_configured');\nif (!ts || !sig || !eventId || !/^\\d{1,12}$/.test(ts)) return reject('missing_headers');\nif (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return reject('expired');\nconst expected = Buffer.from(crypto.createHmac('sha256', secret).update(`${ts}.${raw}`).digest('hex'));\nconst given = Buffer.from(sig);\nif (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return reject('bad_signature');\n\nlet event;\ntry { event = JSON.parse(raw); } catch { return reject('invalid_json'); }\nif (event.eventId !== eventId) return reject('event_id_mismatch');\n\n// RR-2: dedupe on eventId. Ids are remembered only after a successful send (see 'Remember event').\nconst seen = $getWorkflowStaticData('global').seen || {};\nreturn [{ json: { valid: true, duplicate: Boolean(seen[eventId]), event } }];"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000003",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000004",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [720, 480],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unauthorized\" } }}",
+        "options": { "responseCode": 401 }
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000005",
+      "name": "Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [720, 200],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c-dup",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000006",
+      "name": "Respond duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 60],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"duplicate\" } }}",
+        "options": { "responseCode": 200 }
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000007",
+      "name": "Route by event",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [960, 300],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "to lender",
+              "renameOutput": true,
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+                "combinator": "or",
+                "conditions": [
+                  { "id": "r1", "leftValue": "={{ $json.event.type }}", "rightValue": "request.created", "operator": { "type": "string", "operation": "equals" } },
+                  { "id": "r2", "leftValue": "={{ $json.event.type }}", "rightValue": "request.cancelled", "operator": { "type": "string", "operation": "equals" } }
+                ]
+              }
+            },
+            {
+              "outputKey": "to borrower",
+              "renameOutput": true,
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+                "combinator": "or",
+                "conditions": [
+                  { "id": "r3", "leftValue": "={{ $json.event.type }}", "rightValue": "request.approved", "operator": { "type": "string", "operation": "equals" } },
+                  { "id": "r4", "leftValue": "={{ $json.event.type }}", "rightValue": "request.declined", "operator": { "type": "string", "operation": "equals" } },
+                  { "id": "r5", "leftValue": "={{ $json.event.type }}", "rightValue": "loan.returned", "operator": { "type": "string", "operation": "equals" } }
+                ]
+              }
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "unknown" }
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000008",
+      "name": "Compose for lender",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 200],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const e = $json.event;\nconst when = e.dates.start === e.dates.end ? e.dates.start : `${e.dates.start} to ${e.dates.end}`;\nconst text = e.type === 'request.created'\n  ? `Hi ${e.recipient.firstName}, a neighbor asked to borrow your ${e.tool.name} (${when}). Open LendLoop to approve or decline.`\n  : `Hi ${e.recipient.firstName}, the request for your ${e.tool.name} (${when}) was cancelled by the borrower.`;\nreturn { json: { eventId: e.eventId, type: e.type, to: e.recipient.email, subject: `LendLoop: ${e.tool.name}`, text } };"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000009",
+      "name": "Compose for borrower",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 380],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const e = $json.event;\nconst when = e.dates.start === e.dates.end ? e.dates.start : `${e.dates.start} to ${e.dates.end}`;\nconst lines = {\n  'request.approved': `Good news ${e.recipient.firstName}: your request for the ${e.tool.name} (${when}) was approved.`,\n  'request.declined': `Hi ${e.recipient.firstName}, your request for the ${e.tool.name} (${when}) was declined.`,\n  'loan.returned': `Thanks ${e.recipient.firstName}! The ${e.tool.name} has been marked as returned.`,\n};\nreturn { json: { eventId: e.eventId, type: e.type, to: e.recipient.email, subject: `LendLoop: ${e.tool.name}`, text: lines[e.type] } };"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000010",
+      "name": "Respond unknown type",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1200, 560],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unknown_event_type\" } }}",
+        "options": { "responseCode": 422 }
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000011",
+      "name": "Send notification (mock)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Mock channel: logs the message instead of emailing. Swap for an Email/Slack node with a credential in production.\nif ($env.LENDLOOP_FORCE_FAIL === 'true') {\n  throw new Error('Forced failure (LENDLOOP_FORCE_FAIL=true)');\n}\n// Log a masked address only (SR-9).\nconst masked = $json.to.replace(/^(.).*(@.*)$/, '$1***$2');\nconsole.log(`[lendloop] ${$json.type} -> ${masked}: ${$json.subject}`);\nreturn { json: { eventId: $json.eventId, delivered: true, channel: 'mock-log' } };"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000012",
+      "name": "Remember event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Record delivered eventIds so a redelivery from Convex is answered as a duplicate. Keep 24h.\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nconst now = Date.now();\nfor (const [id, t] of Object.entries(store.seen)) if (now - t > 86400000) delete store.seen[id];\nfor (const item of $input.all()) store.seen[item.json.eventId] = now;\nreturn [{ json: { status: 'sent' } }];"
+      }
+    },
+    {
+      "id": "b1a1c1d1-0001-4000-8000-000000000013",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1920, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"sent\" } }}",
+        "options": { "responseCode": 200 }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Verify signature", "type": "main", "index": 0 }]] },
+    "Verify signature": { "main": [[{ "node": "Valid?", "type": "main", "index": 0 }]] },
+    "Valid?": {
+      "main": [
+        [{ "node": "Duplicate?", "type": "main", "index": 0 }],
+        [{ "node": "Respond 401", "type": "main", "index": 0 }]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [{ "node": "Respond duplicate", "type": "main", "index": 0 }],
+        [{ "node": "Route by event", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route by event": {
+      "main": [
+        [{ "node": "Compose for lender", "type": "main", "index": 0 }],
+        [{ "node": "Compose for borrower", "type": "main", "index": 0 }],
+        [{ "node": "Respond unknown type", "type": "main", "index": 0 }]
+      ]
+    },
+    "Compose for lender": { "main": [[{ "node": "Send notification (mock)", "type": "main", "index": 0 }]] },
+    "Compose for borrower": { "main": [[{ "node": "Send notification (mock)", "type": "main", "index": 0 }]] },
+    "Send notification (mock)": { "main": [[{ "node": "Remember event", "type": "main", "index": 0 }]] },
+    "Remember event": { "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "tags": []
+}

@@ -1,0 +1,65 @@
+{
+  "id": "lendloopErrorWf1",
+  "name": "LendLoop – Error handler",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": false
+  },
+  "nodes": [
+    {
+      "id": "b3a3c3d3-0003-4000-8000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "parameters": {}
+    },
+    {
+      "id": "b3a3c3d3-0003-4000-8000-000000000002",
+      "name": "Log and sign report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// FR-N4: report the failure to a visible channel (container log) and sign it for Convex.\nconst crypto = require('crypto');\nconst d = $input.first().json;\nconst report = {\n  workflow: String((d.workflow && d.workflow.name) || 'unknown workflow').slice(0, 200),\n  executionId: String((d.execution && d.execution.id) || (d.trigger && 'trigger-' + Date.now()) || 'unknown').slice(0, 100),\n  node: String((d.execution && d.execution.lastNodeExecuted) || (d.trigger && d.trigger.error && d.trigger.error.node && d.trigger.error.node.name) || 'unknown node').slice(0, 200),\n  message: String(((d.execution && d.execution.error) || (d.trigger && d.trigger.error) || {}).message || 'no message').slice(0, 500),\n};\nconsole.error(`[lendloop] workflow failed: ${report.workflow} > ${report.node}: ${report.message}`);\nconst secret = $env.LENDLOOP_CONVEX_HMAC_SECRET;\nconst body = JSON.stringify(report);\nconst ts = String(Math.floor(Date.now() / 1000));\nconst signature = crypto.createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex');\nreturn [{ json: { body, ts, eventId: `n8n_${crypto.randomUUID()}`, signature } }];"
+      }
+    },
+    {
+      "id": "b3a3c3d3-0003-4000-8000-000000000003",
+      "name": "POST automation error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONVEX_HTTP_URL }}/n8n/automation-error",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-LendLoop-Timestamp", "value": "={{ $json.ts }}" },
+            { "name": "X-LendLoop-Event-Id", "value": "={{ $json.eventId }}" },
+            { "name": "X-LendLoop-Signature", "value": "={{ $json.signature }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": { "timeout": 10000 }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": { "main": [[{ "node": "Log and sign report", "type": "main", "index": 0 }]] },
+    "Log and sign report": { "main": [[{ "node": "POST automation error", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "tags": []
+}

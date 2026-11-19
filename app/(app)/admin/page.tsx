@@ -5,6 +5,7 @@ import { api } from "@/convex/_generated/api";
 import { CATEGORY_LABELS } from "@/convex/lib/constants";
 import { Button, ConfirmButton, EmptyState, Loading, PageHeader, useRun } from "@/components/ui";
 import { LoanRow } from "@/components/LoanRow";
+import { timeAgo } from "@/lib/format";
 import { useMe } from "@/components/MeContext";
 import type { Id } from "@/convex/_generated/dataModel";
 
@@ -21,6 +22,7 @@ export default function AdminPage() {
     <>
       <PageHeader title="Admin" />
       <div className="flex flex-col gap-12">
+        <AutomationIssues />
         <Listings />
         <Lenders />
         <Loans />
@@ -144,6 +146,33 @@ function Loans() {
                 ) : null
               }
             />
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
+/** FR-N4: failed deliveries and n8n error-workflow reports, newest first. */
+function AutomationIssues() {
+  const issues = useQuery(api.automation.recentIssues);
+  return (
+    <Section title="Automation issues">
+      {issues === undefined ? (
+        <Loading />
+      ) : issues.length === 0 ? (
+        <p className="text-ok">No failed notifications or workflow errors.</p>
+      ) : (
+        <ul className="divide-y divide-line border-y border-line">
+          {issues.map((i) => (
+            <li key={i._id} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:justify-between">
+              <span>
+                <strong className="text-bad">{i.type === "automation.error" ? "Workflow error" : `Undelivered ${i.type}`}</strong>{" "}
+                <span className="text-ink-2">{i.detail ?? `${i.attempts} attempts`}</span>
+                {i.lastError ? <span className="block text-sm text-ink-3">{i.lastError}</span> : null}
+              </span>
+              <span className="shrink-0 text-sm text-ink-3">{timeAgo(i.at)}</span>
+            </li>
           ))}
         </ul>
       )}

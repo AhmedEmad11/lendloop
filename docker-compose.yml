@@ -42,6 +42,7 @@ services:
       - "127.0.0.1:5678:5678"
     volumes:
       - n8n-data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
     environment:
       - GENERIC_TIMEZONE=UTC
       - TZ=UTC
@@ -50,6 +51,11 @@ services:
       - LENDLOOP_N8N_HMAC_SECRET=${LENDLOOP_N8N_HMAC_SECRET:?set in .env}
       - LENDLOOP_CONVEX_HMAC_SECRET=${LENDLOOP_CONVEX_HMAC_SECRET:?set in .env}
       - CONVEX_HTTP_URL=http://backend:3211
+      # Code nodes verify/sign HMACs with Node's crypto module.
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+      - CODE_ENABLE_STDOUT=true
+      # Failure drill (AC7): set to true to make the send nodes throw.
+      - LENDLOOP_FORCE_FAIL=${LENDLOOP_FORCE_FAIL:-false}
       # Data minimization (SR-9): keep failed runs for debugging, drop successful ones, prune old data.
       - EXECUTIONS_DATA_SAVE_ON_SUCCESS=none
       - EXECUTIONS_DATA_PRUNE=true
