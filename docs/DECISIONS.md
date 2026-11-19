@@ -14,3 +14,10 @@ Ambiguities resolved during the build. Rule applied: pick the more secure or sim
 | D8 | 2026-11-19 | Convex images from `ghcr.io/convex/*`, pinned by digest; n8n pinned to `2.48.6` | The plan's `ghcr.io/get-convex/*` path now returns 403. Convex publishes no semantic tag, so the digest is the reproducible pin. |
 | D9 | 2026-11-19 | `npm run typecheck` runs `next typegen` first | Next 16 route types (`LayoutProps`) are generated, so a fresh clone needs them before `tsc`. |
 | D10 | 2026-11-19 | Email and first name come from Clerk JWT claims (`email`, `given_name`), not from the client or a Clerk Backend API call | Clerk's Convex token carries only `sub` by default. Adding two claims keeps identity server-derived (SR-1) and avoids giving Convex the Clerk secret key. |
+| D11 | 2026-11-19 | Loan length counts both ends: 20th to 20th is 1 day; max is 30 such days | Matches how people describe a borrow ("3 days" = Fri–Sun). |
+| D12 | 2026-11-19 | A tool is unavailable once an approved loan has *started* and is unreturned, including overdue loans | FR-L5's "covering today" would show an overdue, not-yet-returned tool as available. Future approved loans don't block today. |
+| D13 | 2026-11-19 | Owner delete with open loans is refused (not silently soft-deleted); all deletes are soft | FR-L7 offers either; refusing is clearer to the owner, and soft delete keeps loan history readable. |
+| D14 | 2026-11-19 | Expected failures are `ConvexError({ code, message })` | Stable codes for tests, human messages for inline UI errors. |
+| D15 | 2026-11-19 | One pending request per borrower per tool | Prevents request spam on a lender; not in SRS but a minimal guard. |
+| D16 | 2026-11-19 | `ADMIN_EMAILS` bootstrap only promotes, never demotes; relies on Clerk verifying primary emails | Avoids lockout by env edits; an unverified email can't be a Clerk primary address. |
+| D17 | 2026-11-19 | Signed-in users see a lender's first name and Trusted badge, never their email | Data minimization; email is only used server-side for notifications. |

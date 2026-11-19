@@ -8,6 +8,19 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
+import type * as lib_auth from "../lib/auth.js";
+import type * as lib_constants from "../lib/constants.js";
+import type * as lib_dates from "../lib/dates.js";
+import type * as lib_errors from "../lib/errors.js";
+import type * as lib_loanState from "../lib/loanState.js";
+import type * as lib_loans from "../lib/loans.js";
+import type * as lib_outbox from "../lib/outbox.js";
+import type * as lib_validators from "../lib/validators.js";
+import type * as loans from "../loans.js";
+import type * as notify from "../notify.js";
+import type * as public_ from "../public.js";
+import type * as tools from "../tools.js";
 import type * as users from "../users.js";
 
 import type {
@@ -17,6 +30,19 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
+  "lib/auth": typeof lib_auth;
+  "lib/constants": typeof lib_constants;
+  "lib/dates": typeof lib_dates;
+  "lib/errors": typeof lib_errors;
+  "lib/loanState": typeof lib_loanState;
+  "lib/loans": typeof lib_loans;
+  "lib/outbox": typeof lib_outbox;
+  "lib/validators": typeof lib_validators;
+  loans: typeof loans;
+  notify: typeof notify;
+  public: typeof public_;
+  tools: typeof tools;
   users: typeof users;
 }>;
 

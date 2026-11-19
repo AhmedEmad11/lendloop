@@ -7,7 +7,7 @@ import { api } from "@/convex/_generated/api";
 // M0 placeholder: proves Clerk sign-in and the Clerk -> Convex JWT round trip.
 // Replaced by the real public page in M2.
 export default function Home() {
-  const me = useQuery(api.users.whoami);
+  const me = useQuery(api.users.me);
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
