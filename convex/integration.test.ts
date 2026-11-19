@@ -194,7 +194,9 @@ describe("outbound delivery (SR-4, RR-3, AC6)", () => {
 
   test("posts a signed, minimal payload to n8n and marks the event sent", async () => {
     const { t, loanId, eventId } = await queuedEvent();
-    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response("ok", { status: 200 }));
+    const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(
+      async () => new Response("ok", { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await t.action(internal.notify.deliver, { eventId });
@@ -236,7 +238,7 @@ describe("outbound delivery (SR-4, RR-3, AC6)", () => {
   });
 
   test("with n8n down, retries with backoff then marks failed; the user's action already succeeded", async () => {
-    const { t, eventId } = await queuedEvent();
+    const { t } = await queuedEvent();
     const fetchMock = vi.fn(async () => {
       throw new TypeError("fetch failed: connect ECONNREFUSED");
     });
@@ -256,7 +258,7 @@ describe("outbound delivery (SR-4, RR-3, AC6)", () => {
   });
 
   test("a non-2xx answer counts as a failure and recovers on retry", async () => {
-    const { t, eventId } = await queuedEvent();
+    const { t } = await queuedEvent();
     const responses = [new Response("", { status: 500 }), new Response("ok", { status: 200 })];
     vi.stubGlobal("fetch", vi.fn(async () => responses.shift()!));
 

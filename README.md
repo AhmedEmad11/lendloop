@@ -178,7 +178,7 @@ X-LendLoop-Signature: hex( HMAC-SHA256( secret, timestamp + "." + rawBody ) )
 
 - **One secret per direction**, so a leak on one side can't forge traffic the other way.
 - **The signature covers the timestamp.** A request can't be re-dated, and anything older or newer than **5 minutes** is rejected. Replays inside the window are harmless because every write is idempotent (below).
-- **Constant-time comparison** on both sides. Verification runs before any parsing or database work. Failures return a generic `401`; the reason goes only to server logs.
+- **Constant-time comparison** on both sides. Verification runs before any parsing or database work. Failures return a generic `401` (`503` if the secret isn't configured); the reason goes only to server logs.
 - **Header auth on the n8n webhook** (`X-LendLoop-Auth`, an n8n credential) is a cheap first gate. Without it n8n answers `403` before the workflow runs.
 - **The n8n secrets come from the container env** (`$env.*`, `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`), and the header token from an n8n credential. That's why the exported workflow JSON holds no secret values; see the [secret check](#secret-scanning).
 - The webhook verifies the raw body bytes (Webhook node *Raw Body* option), not a re-serialized object.
