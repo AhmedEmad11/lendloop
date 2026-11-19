@@ -5,6 +5,12 @@ A neighborhood tool-lending board. Neighbors list tools, request them for a date
 
 Stack: Next.js 16 (App Router, TypeScript strict) · Tailwind CSS 4 · Clerk · Convex (self-hosted) · n8n · Vitest + convex-test.
 
+| Public page | Tools board | Borrow dialog |
+|---|---|---|
+| ![Public page](docs/screenshots/public.png) | ![Tools board](docs/screenshots/tools.png) | ![Borrow dialog](docs/screenshots/borrow-dialog.png) |
+| **Incoming requests** | **My requests (mobile)** | |
+| ![Incoming](docs/screenshots/incoming.png) | ![Mobile](docs/screenshots/mobile-requests.png) | |
+
 - [Quick start](#quick-start)
 - [Architecture](#architecture)
 - [Security design](#security-design): RBAC, HMAC signing, data minimization

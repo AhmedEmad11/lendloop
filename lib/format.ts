@@ -57,10 +57,10 @@ export function activityLine(
 ): string | null {
   if (!activity) return null;
   const what: Record<string, string> = {
-    "request.created": "Lender notified",
-    "request.approved": "Approval sent",
-    "request.declined": "Decline sent",
-    "request.cancelled": "Cancellation sent",
+    "request.created": "New-request notice sent",
+    "request.approved": "Approval notice sent",
+    "request.declined": "Decline notice sent",
+    "request.cancelled": "Cancellation notice sent",
     "loan.returned": "Return confirmation sent",
     "reminder.overdue": "Reminder sent",
   };
