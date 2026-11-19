@@ -11,12 +11,42 @@ Stack: Next.js 16 (App Router, TypeScript strict) · Tailwind CSS 4 · Clerk · 
 | **Incoming requests** | **My requests (mobile)** | |
 | ![Incoming](docs/screenshots/incoming.png) | ![Mobile](docs/screenshots/mobile-requests.png) | |
 
+- [What it does](#what-it-does): features and how each requirement is met
 - [Quick start](#quick-start)
 - [Architecture](#architecture)
 - [Security design](#security-design): RBAC, HMAC signing, data minimization
 - [Reliability design](#reliability-design): outbox, retries, idempotency, error workflow
 - [Testing and failure drills](#testing-and-failure-drills)
-- [Known limitations](#known-limitations) · [PRODUCTION.md](PRODUCTION.md) · [Decision log](docs/DECISIONS.md) · [SRS](docs/SRS.md)
+- [Production](#production) · [Known limitations](#known-limitations) · [PRODUCTION.md](PRODUCTION.md) · [Decision log](docs/DECISIONS.md) · [SRS](docs/SRS.md)
+
+---
+
+## What it does
+
+- **Public page (signed out):** LendLoop name and tagline, a read-only list of available tools (name and category only) and a "Sign in to lend or borrow" button.
+- **Signed-in users:** list a tool (name, category, condition, description), request to borrow it for a date range, approve or decline requests on their own tools, and mark a loan returned.
+- **Views:** Tools (all tools, availability, category filter) · My listings · My requests · Incoming requests · Admin (admins only).
+- **Admins:** remove any listing, view all loans, mark a user as Trusted Lender, and see automation failures.
+- **n8n:** a notification when a request is created or changes status, a daily overdue reminder that writes its result back to Convex, and an error workflow.
+- **Automation activity on each loan (bonus):** every loan card shows its latest automation event, such as "Reminder sent 2 days ago", "Approval notice sent 5 minutes ago" or, in red, "Notification failed 1 hour ago".
+
+### Requirements coverage
+
+| Requirement | Where |
+|---|---|
+| Public read-only tool list, no owner details | `convex/public.ts`, `app/page.tsx` |
+| Clerk sign-in | `components/ConvexClientProvider.tsx`, `convex/auth.config.ts` |
+| List, request, approve/decline, mark returned | `convex/tools.ts`, `convex/loans.ts`, `app/(app)/*` |
+| Admin and user roles enforced in Convex | `convex/lib/auth.ts`, `convex/admin.ts` ([RBAC](#rbac-lives-in-convex)) |
+| Request notification workflow | `n8n/workflows/1-request-notification.json`, `convex/notify.ts` |
+| Daily overdue reminder with write-back | `n8n/workflows/2-overdue-reminders.json`, `convex/http.ts`, `convex/automation.ts` |
+| HMAC-signed webhooks, both directions | `convex/lib/hmac.ts` ([scheme](#hmac-signed-integration-both-directions)) |
+| Secrets only in env vars and n8n credentials | [Secret scanning](#secret-scanning) |
+| Idempotent write-backs | [Idempotency](#reliability-design) |
+| Retries and error workflow | `convex/notify.ts`, `n8n/workflows/3-error-handler.json` |
+| Bonus: automation activity per loan | `lib/format.ts` (`activityLine`), `components/LoanRow.tsx` |
+| Exported workflow JSON | `n8n/workflows/` |
+| Production note | [Production](#production), [PRODUCTION.md](PRODUCTION.md) |
 
 ---
 
@@ -47,7 +77,21 @@ npm install
 npm run dev                # http://localhost:3000
 ```
 
+`docker-compose.yml` runs three services on one network: `backend` (self-hosted Convex), `dashboard` (Convex dashboard) and `n8n`. Ports are bound to `127.0.0.1` only.
+
 `bootstrap.sh` is idempotent. It generates the HMAC secrets if they're missing, starts self-hosted Convex and n8n, writes `.env.local`, sets the Convex deployment env, pushes the functions, and imports and publishes the three n8n workflows. It never prints secret values.
+
+<details>
+<summary>Doing it by hand instead of <code>bootstrap.sh</code></summary>
+
+1. Add `LENDLOOP_N8N_HMAC_SECRET`, `LENDLOOP_CONVEX_HMAC_SECRET` and `N8N_WEBHOOK_AUTH_TOKEN` to `.env` (for example `openssl rand -hex 32` each).
+2. `docker compose up -d`
+3. `docker compose exec backend ./generate_admin_key.sh` and put the key in `.env.local` as `CONVEX_SELF_HOSTED_ADMIN_KEY`, with `CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210` and `NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:3210`.
+4. `npx convex env set` for `CLERK_JWT_ISSUER_DOMAIN`, `N8N_WEBHOOK_URL=http://n8n:5678/webhook`, the three secrets above and (optionally) `ADMIN_EMAILS`.
+5. `npx convex dev --once` to push the functions.
+6. `./scripts/n8n-setup.sh` to import the header-auth credential and the three workflows into n8n.
+
+</details>
 
 Optional demo data (two neighbors, three tools, one pending request, one overdue loan):
 
@@ -271,10 +315,22 @@ npm run secrets               # gitleaks over git history
 
 ---
 
+## Production
+
+The full note is in [PRODUCTION.md](PRODUCTION.md). The main changes:
+
+- **Platform:** managed Convex with separate dev and prod deployments; n8n Cloud or n8n in queue mode on Postgres; only the webhook path public, the n8n editor behind SSO or a VPN.
+- **Identity:** a Clerk production instance with verified email and admin MFA; roles synced from Clerk to Convex through a signed webhook.
+- **Secrets:** a secrets manager with rotation, nothing in `.env` files on servers.
+- **Messaging:** a real email provider with SPF and DKIM in place of the mock log channel.
+- **Abuse, observability and data protection:** rate limits, Sentry or Datadog with alerts on the error workflow, audit logging, backups, and retention rules and DPAs fit for a healthcare-like context.
+
+---
+
 ## Known limitations
 
 - **Mock notification channel.** Messages go to the n8n container log. Swapping in the Email (SMTP) or Slack node with a credential is a one-node change.
-- **n8n dedupe state** is workflow static data. It's fine for one instance; queue mode with several workers would need a shared store (Redis or Postgres).
+- **n8n dedupe state** is workflow static data. It's fine for one instance; queue mode with several workers would need a shared store (Redis or Postgres). n8n only saves static data on production (active) executions, so a manual "Execute workflow" test run does not remember event ids.
 - **List queries read whole tables** (`collect()`), which is fine for a neighborhood. Pagination and an availability index are in PRODUCTION.md.
 - **Dates are UTC calendar dates.** A user far from UTC may see "today" roll over at an unexpected local time.
 - Only the lender (or an admin) can mark a loan returned. Borrowers can't, by design (SRS FR-A5).
