@@ -21,3 +21,5 @@ Ambiguities resolved during the build. Rule applied: pick the more secure or sim
 | D15 | 2026-11-19 | One pending request per borrower per tool | Prevents request spam on a lender; not in SRS but a minimal guard. |
 | D16 | 2026-11-19 | `ADMIN_EMAILS` bootstrap only promotes, never demotes; relies on Clerk verifying primary emails | Avoids lockout by env edits; an unverified email can't be a Clerk primary address. |
 | D17 | 2026-11-19 | Signed-in users see a lender's first name and Trusted badge, never their email | Data minimization; email is only used server-side for notifications. |
+| D18 | 2026-11-19 | Signed-in pages live under the `(app)` route group; `proxy.ts` redirects signed-out visitors to sign-in | UX only. Pages render nothing until `users.ensure` has registered the caller; every function re-checks on the server. |
+| D19 | 2026-11-19 | Destructive actions (delete, decline, cancel, remove, mark returned) go through a native `<dialog>` confirmation | Native dialog gives focus trap, Esc and inert background without a UI library. |
