@@ -34,16 +34,17 @@ echo "Starting Docker services..."
 docker compose up -d
 until curl -sf http://127.0.0.1:3210/version >/dev/null; do sleep 2; done
 
-if ! has CONVEX_SELF_HOSTED_ADMIN_KEY .env.local; then
-  key=$(docker compose exec -T backend ./generate_admin_key.sh | tail -1)
-  [ -n "$(tail -c1 .env.local)" ] && echo >> .env.local
-  {
-    echo "NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:3210"
-    echo "CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210"
-    echo "CONVEX_SELF_HOSTED_ADMIN_KEY=$key"
-  } >> .env.local
-  echo "wrote Convex admin key to .env.local"
-fi
+# The admin key is derived from the backend's instance secret, which lives in
+# the Docker volume, so refresh it every run (a fresh volume means a new key).
+key=$(docker compose exec -T backend ./generate_admin_key.sh | tail -1)
+sed -i '/^NEXT_PUBLIC_CONVEX_URL=/d;/^CONVEX_SELF_HOSTED_URL=/d;/^CONVEX_SELF_HOSTED_ADMIN_KEY=/d' .env.local
+[ -s .env.local ] && [ -n "$(tail -c1 .env.local)" ] && echo >> .env.local
+{
+  echo "NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:3210"
+  echo "CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210"
+  echo "CONVEX_SELF_HOSTED_ADMIN_KEY=$key"
+} >> .env.local
+echo "wrote Convex admin key to .env.local"
 
 # The publishable key encodes the Clerk Frontend API host: pk_test_<base64(host$)>.
 pk=$(get NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY .env)
